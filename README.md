@@ -163,3 +163,4 @@ The `vercel.json` configures a cron job to run every 10 minutes:
 ## License
 
 MIT
+
