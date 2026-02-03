@@ -57,8 +57,8 @@ export async function getStoredTokens(userEmail: string): Promise<TokenData | nu
 // Get all stored users (for cron job to fetch all emails)
 export async function getAllUsers(): Promise<TokenData[]> {
   const database = await connectToDatabase();
-  const docs = await database.collection('oauth_tokens').find({}).toArray();
-  return docs as TokenData[];
+  const docs = await database.collection<TokenData>('oauth_tokens').find({}).toArray();
+  return docs as unknown as TokenData[];
 }
 
 // Store tokens for a specific user
