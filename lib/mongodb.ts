@@ -1,6 +1,6 @@
 import { MongoClient, Db } from 'mongodb';
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://ks4190_db_user:pulY33BbK3UQRjKW@please-god.erkorn3.mongodb.net/?appName=please-god';
+const MONGODB_URI = process.env.MONGODB_URI!;
 const DB_NAME = process.env.MONGODB_DB || 'gmail_feed';
 
 let client: MongoClient | null = null;
@@ -16,7 +16,6 @@ export async function connectToDatabase(): Promise<Db> {
   if (db) return db;
 
   if (process.env.NODE_ENV === 'development') {
-    // In development, use a global variable to preserve the connection across HMR
     if (!global._mongoClientPromise) {
       client = new MongoClient(MONGODB_URI, {
         maxPoolSize: 10,
@@ -26,7 +25,6 @@ export async function connectToDatabase(): Promise<Db> {
     }
     client = await global._mongoClientPromise;
   } else {
-    // In production, create a new connection
     if (!client) {
       client = new MongoClient(MONGODB_URI, {
         maxPoolSize: 10,
@@ -40,7 +38,7 @@ export async function connectToDatabase(): Promise<Db> {
   return db;
 }
 
-// Token storage
+// Token storage - MULTI-USER
 export interface TokenData {
   accessToken: string;
   refreshToken: string;
@@ -49,20 +47,28 @@ export interface TokenData {
   updatedAt: Date;
 }
 
-export async function getStoredTokens(): Promise<TokenData | null> {
+// Get tokens for a specific user
+export async function getStoredTokens(userEmail: string): Promise<TokenData | null> {
   const database = await connectToDatabase();
-  const doc = await database.collection('oauth_tokens').findOne({ type: 'gmail_oauth' });
+  const doc = await database.collection('oauth_tokens').findOne({ userEmail });
   return doc as TokenData | null;
 }
 
+// Get all stored users (for cron job to fetch all emails)
+export async function getAllUsers(): Promise<TokenData[]> {
+  const database = await connectToDatabase();
+  const docs = await database.collection('oauth_tokens').find({}).toArray();
+  return docs as TokenData[];
+}
+
+// Store tokens for a specific user
 export async function storeTokens(tokens: Omit<TokenData, 'updatedAt'>): Promise<void> {
   const database = await connectToDatabase();
   await database.collection('oauth_tokens').updateOne(
-    { type: 'gmail_oauth' },
+    { userEmail: tokens.userEmail },
     {
       $set: {
         ...tokens,
-        type: 'gmail_oauth',
         updatedAt: new Date(),
       },
     },
@@ -70,7 +76,13 @@ export async function storeTokens(tokens: Omit<TokenData, 'updatedAt'>): Promise
   );
 }
 
-// Email storage
+// Delete tokens for a user (logout)
+export async function deleteTokens(userEmail: string): Promise<void> {
+  const database = await connectToDatabase();
+  await database.collection('oauth_tokens').deleteOne({ userEmail });
+}
+
+// Email storage - MULTI-USER
 export interface StoredEmail {
   id: string;
   threadId: string;
@@ -90,19 +102,20 @@ export interface EmailCache {
   userEmail: string;
 }
 
-export async function getCachedEmails(): Promise<EmailCache | null> {
+// Get cached emails for a specific user
+export async function getCachedEmails(userEmail: string): Promise<EmailCache | null> {
   const database = await connectToDatabase();
-  const doc = await database.collection('email_cache').findOne({ type: 'inbox_cache' });
+  const doc = await database.collection('email_cache').findOne({ userEmail });
   return doc as EmailCache | null;
 }
 
+// Cache emails for a specific user
 export async function cacheEmails(emails: StoredEmail[], userEmail: string): Promise<void> {
   const database = await connectToDatabase();
   await database.collection('email_cache').updateOne(
-    { type: 'inbox_cache' },
+    { userEmail },
     {
       $set: {
-        type: 'inbox_cache',
         emails,
         userEmail,
         lastFetched: new Date(),
@@ -110,4 +123,10 @@ export async function cacheEmails(emails: StoredEmail[], userEmail: string): Pro
     },
     { upsert: true }
   );
+}
+
+// Delete email cache for a user (logout)
+export async function deleteEmailCache(userEmail: string): Promise<void> {
+  const database = await connectToDatabase();
+  await database.collection('email_cache').deleteOne({ userEmail });
 }

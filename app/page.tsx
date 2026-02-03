@@ -151,9 +151,14 @@ export default function Home() {
               <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Gmail Feed</h1>
             </div>
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-500 dark:text-gray-400">{userEmail}</span>
+              <div className="flex items-center space-x-2 bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full">
+                <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-medium">
+                  {userEmail.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-sm text-gray-700 dark:text-gray-300">{userEmail}</span>
+              </div>
               {lastFetched && (
-                <span className="text-xs text-gray-400 dark:text-gray-500">
+                <span className="text-xs text-gray-400 dark:text-gray-500 hidden sm:inline">
                   Last synced: {formatDate(lastFetched.toISOString())}
                 </span>
               )}
@@ -165,6 +170,16 @@ export default function Home() {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
+              </button>
+              <button
+                onClick={async () => {
+                  await fetch('/api/auth/logout', { method: 'POST' });
+                  window.location.reload();
+                }}
+                className="px-3 py-1 text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                title="Logout"
+              >
+                Logout
               </button>
             </div>
           </div>

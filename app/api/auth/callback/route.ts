@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { exchangeCodeForTokens } from '@/lib/oauth';
-import { fetchEmails } from '@/lib/gmail';
+import { fetchEmailsForUser } from '@/lib/gmail';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -8,8 +8,7 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get('error');
 
   if (error) {
-    console.error('OAuth error:', error);
-    return NextResponse.redirect(new URL('/?error=oauth_error', request.url));
+    return NextResponse.redirect(new URL(`/?error=${error}`, request.url));
   }
 
   if (!code) {
@@ -17,16 +16,27 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Exchange code for tokens and store them
-    await exchangeCodeForTokens(code);
+    // Exchange code for tokens and get user email
+    const tokenData = await exchangeCodeForTokens(code);
     
-    // Fetch initial emails
-    await fetchEmails(50);
+    // Fetch initial emails for this user
+    await fetchEmailsForUser(tokenData.userEmail, 50);
     
-    // Redirect to home page
-    return NextResponse.redirect(new URL('/?success=true', request.url));
+    // Create response with redirect
+    const response = NextResponse.redirect(new URL('/', request.url));
+    
+    // Set a cookie with the user's email for session tracking
+    response.cookies.set('user_email', tokenData.userEmail, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      path: '/',
+    });
+    
+    return response;
   } catch (err) {
-    console.error('Error during OAuth callback:', err);
-    return NextResponse.redirect(new URL('/?error=token_exchange', request.url));
+    console.error('OAuth callback error:', err);
+    return NextResponse.redirect(new URL('/?error=auth_failed', request.url));
   }
 }

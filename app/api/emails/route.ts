@@ -1,39 +1,69 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getCachedEmails } from '@/lib/mongodb';
-import { isAuthenticated } from '@/lib/oauth';
+import { fetchEmailsForUser } from '@/lib/gmail';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const authenticated = await isAuthenticated();
+    // Get user email from cookie
+    const userEmail = request.cookies.get('user_email')?.value;
     
-    if (!authenticated) {
-      return NextResponse.json({ 
-        authenticated: false, 
-        emails: [], 
-        message: 'User needs to authenticate' 
-      }, { status: 401 });
+    if (!userEmail) {
+      return NextResponse.json(
+        { error: 'Not authenticated', authenticated: false },
+        { status: 401 }
+      );
     }
-    
-    const cachedData = await getCachedEmails();
-    
-    if (!cachedData) {
-      return NextResponse.json({ 
-        authenticated: true, 
-        emails: [], 
-        message: 'No emails cached yet' 
+
+    const searchParams = request.nextUrl.searchParams;
+    const refresh = searchParams.get('refresh') === 'true';
+
+    // If refresh requested, fetch fresh emails from Gmail
+    if (refresh) {
+      const result = await fetchEmailsForUser(userEmail, 50);
+      if (result) {
+        return NextResponse.json({
+          authenticated: true,
+          userEmail: result.userEmail,
+          emails: result.emails,
+          lastFetched: new Date(),
+          fromCache: false,
+        });
+      }
+    }
+
+    // Otherwise, return cached emails
+    const cached = await getCachedEmails(userEmail);
+    if (cached) {
+      return NextResponse.json({
+        authenticated: true,
+        userEmail: cached.userEmail,
+        emails: cached.emails,
+        lastFetched: cached.lastFetched,
+        fromCache: true,
       });
     }
-    
-    return NextResponse.json({
-      authenticated: true,
-      emails: cachedData.emails,
-      lastFetched: cachedData.lastFetched,
-      userEmail: cachedData.userEmail,
-    });
+
+    // No cached emails, try fetching fresh
+    const result = await fetchEmailsForUser(userEmail, 50);
+    if (result) {
+      return NextResponse.json({
+        authenticated: true,
+        userEmail: result.userEmail,
+        emails: result.emails,
+        lastFetched: new Date(),
+        fromCache: false,
+      });
+    }
+
+    return NextResponse.json(
+      { error: 'Failed to fetch emails', authenticated: true, userEmail },
+      { status: 500 }
+    );
   } catch (error) {
-    console.error('Error fetching emails:', error);
-    return NextResponse.json({ 
-      error: 'Failed to fetch emails' 
-    }, { status: 500 });
+    console.error('Error in emails API:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

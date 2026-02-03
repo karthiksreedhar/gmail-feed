@@ -3,7 +3,6 @@ import { getOAuth2Client, refreshAccessToken } from './oauth';
 import { getStoredTokens, cacheEmails, StoredEmail } from './mongodb';
 
 function decodeBase64(data: string): string {
-  // Gmail uses URL-safe base64 encoding
   const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
   return Buffer.from(base64, 'base64').toString('utf-8');
 }
@@ -17,26 +16,21 @@ function getHeader(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, nam
 function extractBody(payload: gmail_v1.Schema$MessagePart | undefined): string {
   if (!payload) return '';
 
-  // If the payload has a body with data, decode it
   if (payload.body?.data) {
     return decodeBase64(payload.body.data);
   }
 
-  // If there are parts, search through them
   if (payload.parts) {
     for (const part of payload.parts) {
-      // Prefer text/plain, fall back to text/html
       if (part.mimeType === 'text/plain' && part.body?.data) {
         return decodeBase64(part.body.data);
       }
     }
-    // Try HTML if no plain text found
     for (const part of payload.parts) {
       if (part.mimeType === 'text/html' && part.body?.data) {
         return decodeBase64(part.body.data);
       }
     }
-    // Recursively check nested parts
     for (const part of payload.parts) {
       const nestedBody = extractBody(part);
       if (nestedBody) return nestedBody;
@@ -46,14 +40,14 @@ function extractBody(payload: gmail_v1.Schema$MessagePart | undefined): string {
   return '';
 }
 
-export async function fetchEmails(maxResults: number = 50): Promise<{ emails: StoredEmail[]; userEmail: string } | null> {
-  const tokens = await getStoredTokens();
+// Fetch emails for a specific user (multi-user support)
+export async function fetchEmailsForUser(userEmail: string, maxResults: number = 50): Promise<{ emails: StoredEmail[]; userEmail: string } | null> {
+  const tokens = await getStoredTokens(userEmail);
   if (!tokens) {
-    console.log('No tokens found, user needs to authenticate');
+    console.log(`No tokens found for user: ${userEmail}`);
     return null;
   }
 
-  // Check if token is expired and refresh if needed
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials({
     access_token: tokens.accessToken,
@@ -63,14 +57,13 @@ export async function fetchEmails(maxResults: number = 50): Promise<{ emails: St
 
   // Refresh token if expired
   if (tokens.expiryDate < Date.now()) {
-    console.log('Token expired, refreshing...');
-    await refreshAccessToken(oauth2Client);
+    console.log(`Token expired for ${userEmail}, refreshing...`);
+    await refreshAccessToken(oauth2Client, userEmail);
   }
 
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
   try {
-    // List messages from inbox
     const listResponse = await gmail.users.messages.list({
       userId: 'me',
       maxResults,
@@ -80,7 +73,6 @@ export async function fetchEmails(maxResults: number = 50): Promise<{ emails: St
     const messages = listResponse.data.messages || [];
     const emails: StoredEmail[] = [];
 
-    // Fetch full details for each message
     for (const message of messages) {
       if (!message.id) continue;
 
@@ -109,12 +101,12 @@ export async function fetchEmails(maxResults: number = 50): Promise<{ emails: St
       emails.push(email);
     }
 
-    // Cache the emails in MongoDB
-    await cacheEmails(emails, tokens.userEmail);
+    // Cache the emails for this user
+    await cacheEmails(emails, userEmail);
 
-    return { emails, userEmail: tokens.userEmail };
+    return { emails, userEmail };
   } catch (error) {
-    console.error('Error fetching emails:', error);
+    console.error(`Error fetching emails for ${userEmail}:`, error);
     throw error;
   }
 }

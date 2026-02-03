@@ -48,21 +48,21 @@ export async function exchangeCodeForTokens(code: string): Promise<{
     userEmail,
   };
   
-  // Store tokens in MongoDB
+  // Store tokens in MongoDB (keyed by userEmail for multi-user)
   await storeTokens(tokenData);
   
   return tokenData;
 }
 
-export async function refreshAccessToken(oauth2Client: Auth.OAuth2Client): Promise<void> {
+export async function refreshAccessToken(oauth2Client: Auth.OAuth2Client, userEmail: string): Promise<void> {
   try {
     const { credentials } = await oauth2Client.refreshAccessToken();
     
-    const existingTokens = await getStoredTokens();
+    const existingTokens = await getStoredTokens(userEmail);
     if (existingTokens) {
       await storeTokens({
         accessToken: credentials.access_token || '',
-        refreshToken: existingTokens.refreshToken, // Keep the same refresh token
+        refreshToken: existingTokens.refreshToken,
         expiryDate: credentials.expiry_date || Date.now() + 3600000,
         userEmail: existingTokens.userEmail,
       });
@@ -75,7 +75,7 @@ export async function refreshAccessToken(oauth2Client: Auth.OAuth2Client): Promi
   }
 }
 
-export async function isAuthenticated(): Promise<boolean> {
-  const tokens = await getStoredTokens();
+export async function isAuthenticated(userEmail: string): Promise<boolean> {
+  const tokens = await getStoredTokens(userEmail);
   return tokens !== null && tokens.refreshToken !== '';
 }

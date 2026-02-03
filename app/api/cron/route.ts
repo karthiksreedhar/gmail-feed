@@ -1,51 +1,74 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchEmails } from '@/lib/gmail';
-import { isAuthenticated } from '@/lib/oauth';
+import { fetchEmailsForUser } from '@/lib/gmail';
+import { getAllUsers } from '@/lib/mongodb';
 
-// This endpoint is called by Vercel Cron Jobs
-// It runs every 10 minutes to fetch new emails
+// This endpoint is called by Vercel Cron every 10 minutes
+// It fetches emails for ALL authenticated users
 export async function GET(request: NextRequest) {
-  // Verify the request is from Vercel Cron
-  const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
-  
-  // In production, verify the cron secret
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  
   try {
-    const authenticated = await isAuthenticated();
+    // Optional: Verify cron secret for security
+    const authHeader = request.headers.get('authorization');
+    const cronSecret = process.env.CRON_SECRET;
     
-    if (!authenticated) {
-      return NextResponse.json({ 
-        success: false, 
-        message: 'User not authenticated, skipping email fetch' 
+    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+      // Allow Vercel's internal cron calls (they don't send auth header)
+      const isVercelCron = request.headers.get('x-vercel-cron') === '1';
+      if (!isVercelCron) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+    }
+
+    // Get all authenticated users
+    const users = await getAllUsers();
+    
+    if (users.length === 0) {
+      return NextResponse.json({
+        success: true,
+        message: 'No authenticated users found',
+        usersProcessed: 0,
       });
     }
-    
-    console.log('Cron job: Fetching emails...');
-    const result = await fetchEmails(50);
-    
-    if (result) {
-      console.log(`Cron job: Successfully fetched ${result.emails.length} emails`);
-      return NextResponse.json({ 
-        success: true, 
-        emailCount: result.emails.length,
-        userEmail: result.userEmail,
-        timestamp: new Date().toISOString(),
-      });
-    } else {
-      return NextResponse.json({ 
-        success: false, 
-        message: 'No emails fetched' 
-      });
+
+    console.log(`Cron job: Fetching emails for ${users.length} users`);
+
+    const results: { userEmail: string; success: boolean; emailCount?: number; error?: string }[] = [];
+
+    // Fetch emails for each user
+    for (const user of users) {
+      try {
+        const result = await fetchEmailsForUser(user.userEmail, 50);
+        results.push({
+          userEmail: user.userEmail,
+          success: true,
+          emailCount: result?.emails.length || 0,
+        });
+        console.log(`Fetched ${result?.emails.length || 0} emails for ${user.userEmail}`);
+      } catch (error) {
+        console.error(`Error fetching emails for ${user.userEmail}:`, error);
+        results.push({
+          userEmail: user.userEmail,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
     }
+
+    const successCount = results.filter(r => r.success).length;
+
+    return NextResponse.json({
+      success: true,
+      message: `Processed ${users.length} users`,
+      usersProcessed: users.length,
+      successCount,
+      failedCount: users.length - successCount,
+      results,
+      timestamp: new Date().toISOString(),
+    });
   } catch (error) {
     console.error('Cron job error:', error);
-    return NextResponse.json({ 
-      success: false, 
-      error: 'Failed to fetch emails' 
-    }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: 'Failed to process cron job' },
+      { status: 500 }
+    );
   }
 }
