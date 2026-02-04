@@ -6,7 +6,6 @@ const DB_NAME = process.env.MONGODB_DB || 'gmail_feed';
 let client: MongoClient | null = null;
 let db: Db | null = null;
 
-// For serverless environments, we need to cache the connection
 declare global {
   // eslint-disable-next-line no-var
   var _mongoClientPromise: Promise<MongoClient> | undefined;
@@ -47,21 +46,18 @@ export interface TokenData {
   updatedAt: Date;
 }
 
-// Get tokens for a specific user
 export async function getStoredTokens(userEmail: string): Promise<TokenData | null> {
   const database = await connectToDatabase();
   const doc = await database.collection('oauth_tokens').findOne({ userEmail });
   return doc as TokenData | null;
 }
 
-// Get all stored users (for cron job to fetch all emails)
 export async function getAllUsers(): Promise<TokenData[]> {
   const database = await connectToDatabase();
   const docs = await database.collection<TokenData>('oauth_tokens').find({}).toArray();
   return docs as unknown as TokenData[];
 }
 
-// Store tokens for a specific user
 export async function storeTokens(tokens: Omit<TokenData, 'updatedAt'>): Promise<void> {
   const database = await connectToDatabase();
   await database.collection('oauth_tokens').updateOne(
@@ -76,13 +72,74 @@ export async function storeTokens(tokens: Omit<TokenData, 'updatedAt'>): Promise
   );
 }
 
-// Delete tokens for a user (logout)
 export async function deleteTokens(userEmail: string): Promise<void> {
   const database = await connectToDatabase();
   await database.collection('oauth_tokens').deleteOne({ userEmail });
 }
 
-// Email storage - MULTI-USER
+// Message within a thread
+export interface ThreadMessage {
+  id: string;
+  snippet: string;
+  subject: string;
+  from: string;
+  to: string;
+  date: string;
+  body: string;
+  isUnread: boolean;
+  labels: string[];
+  isSent: boolean; // true if sent by the user
+}
+
+// Thread (group of messages)
+export interface EmailThread {
+  threadId: string;
+  subject: string;
+  snippet: string; // Latest message snippet
+  participants: string[]; // All participants in the thread
+  messageCount: number;
+  messages: ThreadMessage[];
+  lastMessageDate: string;
+  hasUnread: boolean;
+  labels: string[];
+}
+
+export interface ThreadCache {
+  threads: EmailThread[];
+  lastFetched: Date;
+  userEmail: string;
+}
+
+// Get cached threads for a specific user
+export async function getCachedThreads(userEmail: string): Promise<ThreadCache | null> {
+  const database = await connectToDatabase();
+  const doc = await database.collection('thread_cache').findOne({ userEmail });
+  return doc as ThreadCache | null;
+}
+
+// Cache threads for a specific user
+export async function cacheThreads(threads: EmailThread[], userEmail: string): Promise<void> {
+  const database = await connectToDatabase();
+  await database.collection('thread_cache').updateOne(
+    { userEmail },
+    {
+      $set: {
+        threads,
+        userEmail,
+        lastFetched: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+}
+
+// Delete thread cache for a user (logout)
+export async function deleteThreadCache(userEmail: string): Promise<void> {
+  const database = await connectToDatabase();
+  await database.collection('thread_cache').deleteOne({ userEmail });
+}
+
+// Legacy - keep for backwards compatibility
 export interface StoredEmail {
   id: string;
   threadId: string;
@@ -102,14 +159,12 @@ export interface EmailCache {
   userEmail: string;
 }
 
-// Get cached emails for a specific user
 export async function getCachedEmails(userEmail: string): Promise<EmailCache | null> {
   const database = await connectToDatabase();
   const doc = await database.collection('email_cache').findOne({ userEmail });
   return doc as EmailCache | null;
 }
 
-// Cache emails for a specific user
 export async function cacheEmails(emails: StoredEmail[], userEmail: string): Promise<void> {
   const database = await connectToDatabase();
   await database.collection('email_cache').updateOne(
@@ -125,7 +180,6 @@ export async function cacheEmails(emails: StoredEmail[], userEmail: string): Pro
   );
 }
 
-// Delete email cache for a user (logout)
 export async function deleteEmailCache(userEmail: string): Promise<void> {
   const database = await connectToDatabase();
   await database.collection('email_cache').deleteOne({ userEmail });

@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 
-interface Email {
+interface ThreadMessage {
   id: string;
-  threadId: string;
   snippet: string;
   subject: string;
   from: string;
@@ -13,11 +12,24 @@ interface Email {
   body: string;
   isUnread: boolean;
   labels: string[];
+  isSent: boolean;
 }
 
-interface EmailsResponse {
+interface EmailThread {
+  threadId: string;
+  subject: string;
+  snippet: string;
+  participants: string[];
+  messageCount: number;
+  messages: ThreadMessage[];
+  lastMessageDate: string;
+  hasUnread: boolean;
+  labels: string[];
+}
+
+interface ThreadsResponse {
   authenticated: boolean;
-  emails: Email[];
+  threads: EmailThread[];
   lastFetched?: string;
   userEmail?: string;
   message?: string;
@@ -25,22 +37,22 @@ interface EmailsResponse {
 }
 
 export default function Home() {
-  const [emails, setEmails] = useState<Email[]>([]);
+  const [threads, setThreads] = useState<EmailThread[]>([]);
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
   const [userEmail, setUserEmail] = useState<string>('');
   const [error, setError] = useState<string>('');
-  const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
+  const [expandedThread, setExpandedThread] = useState<string | null>(null);
 
-  const fetchEmails = useCallback(async () => {
+  const fetchThreads = useCallback(async () => {
     try {
       const response = await fetch('/api/emails');
-      const data: EmailsResponse = await response.json();
+      const data: ThreadsResponse = await response.json();
       
       if (data.authenticated) {
         setAuthenticated(true);
-        setEmails(data.emails || []);
+        setThreads(data.threads || []);
         if (data.lastFetched) {
           setLastFetched(new Date(data.lastFetched));
         }
@@ -53,21 +65,21 @@ export default function Home() {
         setError(data.message || '');
       }
     } catch (err) {
-      console.error('Error fetching emails:', err);
-      setError('Failed to fetch emails');
+      console.error('Error fetching threads:', err);
+      setError('Failed to fetch threads');
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchEmails();
+    fetchThreads();
     
-    // Refresh emails every 5 minutes (300000ms)
-    const interval = setInterval(fetchEmails, 5 * 60 * 1000);
+    // Refresh every 5 minutes
+    const interval = setInterval(fetchThreads, 5 * 60 * 1000);
     
     return () => clearInterval(interval);
-  }, [fetchEmails]);
+  }, [fetchThreads]);
 
   const formatDate = (dateString: string) => {
     try {
@@ -89,7 +101,7 @@ export default function Home() {
     }
   };
 
-  const extractSenderName = (from: string) => {
+  const extractName = (from: string) => {
     const match = from.match(/^([^<]+)/);
     if (match) {
       return match[1].trim().replace(/"/g, '');
@@ -119,7 +131,7 @@ export default function Home() {
           </div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Gmail Feed</h1>
           <p className="text-gray-600 dark:text-gray-400 mb-8">
-            Connect your Gmail account to view your inbox. Emails are automatically synced every 10 minutes.
+            Connect your Gmail account to view your inbox. Threads are automatically synced every 10 minutes.
           </p>
           <a
             href="/api/auth/login"
@@ -163,7 +175,7 @@ export default function Home() {
                 </span>
               )}
               <button
-                onClick={fetchEmails}
+                onClick={fetchThreads}
                 className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 title="Refresh"
               >
@@ -186,7 +198,7 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Email List */}
+      {/* Thread List */}
       <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
         {error && (
           <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
@@ -194,71 +206,117 @@ export default function Home() {
           </div>
         )}
         
-        {emails.length === 0 ? (
+        {threads.length === 0 ? (
           <div className="text-center py-12">
             <svg className="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
             </svg>
-            <p className="text-gray-500 dark:text-gray-400">No emails found. Emails will sync every 10 minutes.</p>
+            <p className="text-gray-500 dark:text-gray-400">No threads found. Threads will sync every 10 minutes.</p>
           </div>
         ) : (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
             <ul className="divide-y divide-gray-200 dark:divide-gray-700">
-              {emails.map((email) => (
+              {threads.map((thread) => (
                 <li
-                  key={email.id}
-                  onClick={() => setSelectedEmail(selectedEmail?.id === email.id ? null : email)}
-                  className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer transition-colors ${
-                    email.isUnread ? 'bg-blue-50 dark:bg-blue-900/10' : ''
-                  }`}
+                  key={thread.threadId}
+                  className={`transition-colors ${thread.hasUnread ? 'bg-blue-50 dark:bg-blue-900/10' : ''}`}
                 >
-                  <div className="flex items-start space-x-4">
-                    <div className="flex-shrink-0">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-medium ${
-                        email.isUnread ? 'bg-blue-500' : 'bg-gray-400'
-                      }`}>
-                        {extractSenderName(email.from).charAt(0).toUpperCase()}
+                  {/* Thread Header */}
+                  <div 
+                    onClick={() => setExpandedThread(expandedThread === thread.threadId ? null : thread.threadId)}
+                    className="p-4 hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer"
+                  >
+                    <div className="flex items-start space-x-4">
+                      <div className="flex-shrink-0">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-medium ${
+                          thread.hasUnread ? 'bg-blue-500' : 'bg-gray-400'
+                        }`}>
+                          {thread.participants[0]?.charAt(0).toUpperCase() || '?'}
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-start">
-                        <p className={`text-sm ${email.isUnread ? 'font-semibold text-gray-900 dark:text-white' : 'text-gray-700 dark:text-gray-300'}`}>
-                          {extractSenderName(email.from)}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center space-x-2">
+                            <p className={`text-sm ${thread.hasUnread ? 'font-semibold text-gray-900 dark:text-white' : 'text-gray-700 dark:text-gray-300'}`}>
+                              {thread.participants.slice(0, 3).join(', ')}
+                              {thread.participants.length > 3 && ` +${thread.participants.length - 3}`}
+                            </p>
+                            {thread.messageCount > 1 && (
+                              <span className="text-xs bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full">
+                                {thread.messageCount}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap ml-2">
+                            {formatDate(thread.lastMessageDate)}
+                          </span>
+                        </div>
+                        <p className={`text-sm mt-1 ${thread.hasUnread ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400'}`}>
+                          {thread.subject}
                         </p>
-                        <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap ml-2">
-                          {formatDate(email.date)}
-                        </span>
+                        <p className="text-sm text-gray-500 dark:text-gray-500 mt-1 truncate">
+                          {thread.snippet}
+                        </p>
                       </div>
-                      <p className={`text-sm mt-1 ${email.isUnread ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400'}`}>
-                        {email.subject || '(No subject)'}
-                      </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-500 mt-1 truncate">
-                        {email.snippet}
-                      </p>
-                      
-                      {/* Expanded email body */}
-                      {selectedEmail?.id === email.id && (
-                        <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                            <p><strong>From:</strong> {email.from}</p>
-                            <p><strong>To:</strong> {email.to}</p>
-                            <p><strong>Date:</strong> {new Date(email.date).toLocaleString()}</p>
-                          </div>
-                          <div className="border-t border-gray-200 dark:border-gray-600 pt-4 mt-2">
-                            <div 
-                              className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap"
-                              dangerouslySetInnerHTML={{ __html: email.body.substring(0, 2000) + (email.body.length > 2000 ? '...' : '') }}
-                            />
-                          </div>
+                      {thread.hasUnread && (
+                        <div className="flex-shrink-0">
+                          <span className="inline-block w-2 h-2 bg-blue-500 rounded-full"></span>
                         </div>
                       )}
-                    </div>
-                    {email.isUnread && (
                       <div className="flex-shrink-0">
-                        <span className="inline-block w-2 h-2 bg-blue-500 rounded-full"></span>
+                        <svg 
+                          className={`w-5 h-5 text-gray-400 transition-transform ${expandedThread === thread.threadId ? 'rotate-180' : ''}`} 
+                          fill="none" 
+                          stroke="currentColor" 
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
                       </div>
-                    )}
+                    </div>
                   </div>
+                  
+                  {/* Expanded Thread Messages */}
+                  {expandedThread === thread.threadId && (
+                    <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-850">
+                      {thread.messages.map((message, idx) => (
+                        <div 
+                          key={message.id} 
+                          className={`p-4 ${idx > 0 ? 'border-t border-gray-200 dark:border-gray-700' : ''}`}
+                        >
+                          <div className="flex items-start space-x-3">
+                            <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium ${
+                              message.isSent ? 'bg-green-500' : 'bg-gray-400'
+                            }`}>
+                              {message.isSent ? 'Me' : extractName(message.from).charAt(0).toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex justify-between items-start mb-2">
+                                <div>
+                                  <p className={`text-sm font-medium ${message.isSent ? 'text-green-700 dark:text-green-400' : 'text-gray-900 dark:text-white'}`}>
+                                    {message.isSent ? 'Me' : extractName(message.from)}
+                                    {message.isSent && <span className="ml-2 text-xs text-gray-500">(sent)</span>}
+                                  </p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    To: {message.to}
+                                  </p>
+                                </div>
+                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                  {new Date(message.date).toLocaleString()}
+                                </span>
+                              </div>
+                              <div 
+                                className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700"
+                                dangerouslySetInnerHTML={{ 
+                                  __html: message.body.substring(0, 3000) + (message.body.length > 3000 ? '...' : '') 
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -266,8 +324,8 @@ export default function Home() {
         )}
         
         <div className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
-          <p>Emails are automatically synced every 10 minutes by the server.</p>
-          <p>This page refreshes every 5 minutes to show the latest cached emails.</p>
+          <p>Threads are automatically synced every 10 minutes by the server.</p>
+          <p>This page refreshes every 5 minutes to show the latest cached threads.</p>
         </div>
       </div>
     </main>

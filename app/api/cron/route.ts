@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchEmailsForUser } from '@/lib/gmail';
+import { fetchThreadsForUser } from '@/lib/gmail';
 import { getAllUsers } from '@/lib/mongodb';
 
 // This endpoint is called by Vercel Cron every 10 minutes
-// It fetches emails for ALL authenticated users
+// It fetches threads for ALL authenticated users
 export async function GET(request: NextRequest) {
   try {
     // Optional: Verify cron secret for security
@@ -29,22 +29,22 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    console.log(`Cron job: Fetching emails for ${users.length} users`);
+    console.log(`Cron job: Fetching threads for ${users.length} users`);
 
-    const results: { userEmail: string; success: boolean; emailCount?: number; error?: string }[] = [];
+    const results: { userEmail: string; success: boolean; threadCount?: number; error?: string }[] = [];
 
-    // Fetch emails for each user
+    // Fetch threads for each user
     for (const user of users) {
       try {
-        const result = await fetchEmailsForUser(user.userEmail, 50);
+        const result = await fetchThreadsForUser(user.userEmail, 50);
         results.push({
           userEmail: user.userEmail,
           success: true,
-          emailCount: result?.emails.length || 0,
+          threadCount: result?.threads.length || 0,
         });
-        console.log(`Fetched ${result?.emails.length || 0} emails for ${user.userEmail}`);
+        console.log(`Fetched ${result?.threads.length || 0} threads for ${user.userEmail}`);
       } catch (error) {
-        console.error(`Error fetching emails for ${user.userEmail}:`, error);
+        console.error(`Error fetching threads for ${user.userEmail}:`, error);
         results.push({
           userEmail: user.userEmail,
           success: false,

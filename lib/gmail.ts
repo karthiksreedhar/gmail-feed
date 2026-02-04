@@ -1,6 +1,6 @@
 import { google, gmail_v1 } from 'googleapis';
 import { getOAuth2Client, refreshAccessToken } from './oauth';
-import { getStoredTokens, cacheEmails, StoredEmail } from './mongodb';
+import { getStoredTokens, cacheThreads, EmailThread, ThreadMessage } from './mongodb';
 
 function decodeBase64(data: string): string {
   const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
@@ -40,8 +40,24 @@ function extractBody(payload: gmail_v1.Schema$MessagePart | undefined): string {
   return '';
 }
 
-// Fetch emails for a specific user (multi-user support)
-export async function fetchEmailsForUser(userEmail: string, maxResults: number = 50): Promise<{ emails: StoredEmail[]; userEmail: string } | null> {
+function extractEmailAddress(fromHeader: string): string {
+  const match = fromHeader.match(/<([^>]+)>/);
+  if (match) {
+    return match[1].toLowerCase();
+  }
+  return fromHeader.toLowerCase();
+}
+
+function extractName(fromHeader: string): string {
+  const match = fromHeader.match(/^([^<]+)/);
+  if (match) {
+    return match[1].trim().replace(/"/g, '');
+  }
+  return fromHeader.split('@')[0];
+}
+
+// Fetch threads for a specific user (multi-user support)
+export async function fetchThreadsForUser(userEmail: string, maxResults: number = 50): Promise<{ threads: EmailThread[]; userEmail: string } | null> {
   const tokens = await getStoredTokens(userEmail);
   if (!tokens) {
     console.log(`No tokens found for user: ${userEmail}`);
@@ -64,49 +80,121 @@ export async function fetchEmailsForUser(userEmail: string, maxResults: number =
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
   try {
-    const listResponse = await gmail.users.messages.list({
+    // List threads from inbox (includes sent messages in threads)
+    const listResponse = await gmail.users.threads.list({
       userId: 'me',
       maxResults,
       labelIds: ['INBOX'],
     });
 
-    const messages = listResponse.data.messages || [];
-    const emails: StoredEmail[] = [];
+    const threadList = listResponse.data.threads || [];
+    const threads: EmailThread[] = [];
 
-    for (const message of messages) {
-      if (!message.id) continue;
+    for (const thread of threadList) {
+      if (!thread.id) continue;
 
-      const msgResponse = await gmail.users.messages.get({
+      // Get full thread with all messages
+      const threadResponse = await gmail.users.threads.get({
         userId: 'me',
-        id: message.id,
+        id: thread.id,
         format: 'full',
       });
 
-      const msg = msgResponse.data;
-      const headers = msg.payload?.headers;
+      const fullThread = threadResponse.data;
+      const messages = fullThread.messages || [];
+      
+      if (messages.length === 0) continue;
 
-      const email: StoredEmail = {
-        id: msg.id || '',
-        threadId: msg.threadId || '',
-        snippet: msg.snippet || '',
-        subject: getHeader(headers, 'Subject'),
-        from: getHeader(headers, 'From'),
-        to: getHeader(headers, 'To'),
-        date: getHeader(headers, 'Date'),
-        body: extractBody(msg.payload),
-        isUnread: msg.labelIds?.includes('UNREAD') || false,
-        labels: msg.labelIds || [],
+      const threadMessages: ThreadMessage[] = [];
+      const participants = new Set<string>();
+      let hasUnread = false;
+      let threadSubject = '';
+      const allLabels = new Set<string>();
+
+      // Process all messages in the thread (oldest first)
+      for (const msg of messages) {
+        const headers = msg.payload?.headers;
+        const from = getHeader(headers, 'From');
+        const to = getHeader(headers, 'To');
+        const subject = getHeader(headers, 'Subject');
+        const date = getHeader(headers, 'Date');
+        const labels = msg.labelIds || [];
+        
+        const fromEmail = extractEmailAddress(from);
+        const isSent = labels.includes('SENT') || fromEmail === userEmail.toLowerCase();
+        const isUnread = labels.includes('UNREAD');
+        
+        if (isUnread) hasUnread = true;
+        
+        // Collect participants
+        participants.add(extractName(from));
+        if (to) {
+          // Parse multiple recipients
+          const toAddresses = to.split(',');
+          for (const addr of toAddresses) {
+            participants.add(extractName(addr.trim()));
+          }
+        }
+        
+        // Use the first message's subject as thread subject (without Re:, Fwd:)
+        if (!threadSubject && subject) {
+          threadSubject = subject.replace(/^(Re:|Fwd:|FW:)\s*/gi, '').trim();
+        }
+        
+        // Collect all labels
+        labels.forEach(l => allLabels.add(l));
+
+        const message: ThreadMessage = {
+          id: msg.id || '',
+          snippet: msg.snippet || '',
+          subject: subject,
+          from: from,
+          to: to,
+          date: date,
+          body: extractBody(msg.payload),
+          isUnread: isUnread,
+          labels: labels,
+          isSent: isSent,
+        };
+
+        threadMessages.push(message);
+      }
+
+      // Get the latest message for thread preview
+      const latestMessage = threadMessages[threadMessages.length - 1];
+      
+      // Remove the current user from participants display
+      const participantList = Array.from(participants).filter(p => {
+        const pLower = p.toLowerCase();
+        return !userEmail.toLowerCase().includes(pLower) && pLower !== 'me';
+      });
+
+      const emailThread: EmailThread = {
+        threadId: fullThread.id || '',
+        subject: threadSubject || '(No subject)',
+        snippet: latestMessage.snippet,
+        participants: participantList.length > 0 ? participantList : ['me'],
+        messageCount: threadMessages.length,
+        messages: threadMessages,
+        lastMessageDate: latestMessage.date,
+        hasUnread: hasUnread,
+        labels: Array.from(allLabels),
       };
 
-      emails.push(email);
+      threads.push(emailThread);
     }
 
-    // Cache the emails for this user
-    await cacheEmails(emails, userEmail);
+    // Cache the threads for this user
+    await cacheThreads(threads, userEmail);
 
-    return { emails, userEmail };
+    return { threads, userEmail };
   } catch (error) {
-    console.error(`Error fetching emails for ${userEmail}:`, error);
+    console.error(`Error fetching threads for ${userEmail}:`, error);
     throw error;
   }
+}
+
+// Legacy function for backwards compatibility
+export async function fetchEmailsForUser(userEmail: string, maxResults: number = 50) {
+  return fetchThreadsForUser(userEmail, maxResults);
 }

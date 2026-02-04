@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { exchangeCodeForTokens } from '@/lib/oauth';
-import { fetchEmailsForUser } from '@/lib/gmail';
+import { fetchThreadsForUser } from '@/lib/gmail';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -19,8 +19,8 @@ export async function GET(request: NextRequest) {
     // Exchange code for tokens and get user email
     const tokenData = await exchangeCodeForTokens(code);
     
-    // Fetch initial emails for this user
-    await fetchEmailsForUser(tokenData.userEmail, 50);
+    // Fetch initial threads for this user
+    await fetchThreadsForUser(tokenData.userEmail, 50);
     
     // Create response with redirect
     const response = NextResponse.redirect(new URL('/', request.url));
